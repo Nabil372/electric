@@ -1358,6 +1358,64 @@ defmodule Electric.Plug.ServeShapePlugTest do
       assert body =~ "test-value"
     end
 
+    test "streams changes past a chunk boundary in one SSE response, then up-to-date", ctx do
+      test_pid = self()
+      chunk_boundary = LogOffset.new(Lsn.from_integer(200), 0)
+      latest_offset = LogOffset.new(Lsn.from_integer(300), 0)
+
+      patch_shape_cache(
+        resolve_shape_handle: fn @test_shape_handle, @test_shape, _stack_id, _opts ->
+          {@test_shape_handle, @test_offset}
+        end,
+        has_shape?: fn @test_shape_handle, _opts -> true end,
+        await_snapshot_start: fn @test_shape_handle, _ -> :started end
+      )
+
+      expect_storage(
+        # The request is at the log end, so the response opens as a live stream.
+        get_chunk_end_log_offset: fn @test_offset, _ -> nil end,
+        get_log_stream: fn @test_offset, @test_offset, @test_opts ->
+          send(test_pid, :sse_open)
+          []
+        end,
+        # The first change carries the log past a chunk boundary.
+        get_chunk_end_log_offset: fn @test_offset, _ -> chunk_boundary end,
+        get_log_stream: fn @test_offset, ^chunk_boundary, @test_opts ->
+          [Jason.encode!(%{key: "before-boundary"})]
+        end,
+        # The rest of the log, read from the boundary.
+        get_chunk_end_log_offset: fn ^chunk_boundary, _ -> nil end,
+        get_log_stream: fn ^chunk_boundary, ^latest_offset, @test_opts ->
+          [Jason.encode!(%{key: "after-boundary"})]
+        end
+      )
+
+      ctx = Map.put(ctx, :sse_timeout, 500)
+
+      task =
+        Task.async(fn ->
+          ctx
+          |> conn(
+            :get,
+            %{"table" => "public.users"},
+            "?offset=#{@test_offset}&handle=#{@test_shape_handle}&live=true&live_sse=true"
+          )
+          |> call_serve_shape_plug(ctx)
+        end)
+
+      assert_receive :sse_open, @receive_timeout
+
+      Registry.dispatch(ctx.registry, @test_shape_handle, fn [{pid, ref}] ->
+        send(pid, {ref, :new_changes, latest_offset})
+      end)
+
+      %{resp_body: body} = Task.await(task)
+
+      assert body =~ "before-boundary"
+      assert body =~ "after-boundary"
+      assert body =~ ~s("control":"up-to-date")
+    end
+
     test "works with deprecated experimental_live_sse=true", ctx do
       patch_shape_cache(
         resolve_shape_handle: fn @test_shape_handle, @test_shape, _stack_id, _opts ->

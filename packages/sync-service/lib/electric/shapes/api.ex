@@ -1077,8 +1077,16 @@ defmodule Electric.Shapes.Api do
 
     receive do
       {^ref, :new_changes, latest_log_offset} ->
+        # Each segment starts where the previous one ended, so its chunk end
+        # and up-to-date are worked out from `since_offset`, not from the
+        # request's original offset: once the log passed that offset's chunk
+        # end, every later segment would be empty and carry no up-to-date.
         updated_request =
-          %{request | last_offset: latest_log_offset}
+          %{
+            request
+            | last_offset: latest_log_offset,
+              params: %{request.params | offset: since_offset}
+          }
           |> determine_global_last_seen_lsn()
           |> determine_log_chunk_offset()
           |> determine_up_to_date()
@@ -1096,6 +1104,13 @@ defmodule Electric.Shapes.Api do
              ) do
           {:ok, log} ->
             Process.cancel_timer(keepalive_ref)
+
+            # A segment that stops at a chunk boundary before the log end has
+            # no up-to-date; send the rest at once instead of waiting for the
+            # next change to the shape.
+            if not updated_request.response.up_to_date do
+              send(self(), {ref, :new_changes, latest_log_offset})
+            end
 
             control_messages = maybe_up_to_date(updated_request, end_offset.tx_offset)
             message_stream = Stream.concat(log, control_messages)
