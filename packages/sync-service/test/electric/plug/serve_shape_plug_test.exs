@@ -86,6 +86,10 @@ defmodule Electric.Plug.ServeShapePlugTest do
     Plug.Test.conn(method, "/" <> query_string, params)
   end
 
+  defp with_http_protocol(%Plug.Conn{adapter: {adapter, payload}} = conn, protocol) do
+    %{conn | adapter: {adapter, %{payload | http_protocol: protocol}}}
+  end
+
   defp build_plug_opts(ctx) do
     Api.plug_opts(
       stack_id: ctx.stack_id,
@@ -1302,6 +1306,38 @@ defmodule Electric.Plug.ServeShapePlugTest do
 
       assert conn.status == 200
       assert conn.state == :chunked
+    end
+
+    test "omits the connection header from an SSE response on HTTP/2", ctx do
+      patch_shape_cache(
+        resolve_shape_handle: fn @test_shape_handle, @test_shape, _stack_id, _opts ->
+          {@test_shape_handle, @test_offset}
+        end,
+        has_shape?: fn @test_shape_handle, _opts -> true end,
+        await_snapshot_start: fn @test_shape_handle, _ -> :started end
+      )
+
+      expect_storage(
+        get_chunk_end_log_offset: fn @test_offset, _ -> nil end,
+        get_log_stream: fn @test_offset, @test_offset, @test_opts -> [] end
+      )
+
+      ctx = Map.put(ctx, :sse_timeout, 100)
+
+      conn =
+        ctx
+        |> conn(
+          :get,
+          %{"table" => "public.users"},
+          "?offset=#{@test_offset}&handle=#{@test_shape_handle}&live=true&live_sse=true"
+        )
+        |> with_http_protocol(:"HTTP/2")
+        |> call_serve_shape_plug(ctx)
+
+      assert conn.status == 200
+      assert conn.state == :chunked
+      assert {"content-type", "text/event-stream"} in conn.resp_headers
+      refute List.keymember?(conn.resp_headers, "connection", 0)
     end
 
     test "returns 400 when live_sse=true but live=false", ctx do

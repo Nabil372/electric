@@ -452,11 +452,29 @@ defmodule Electric.Shapes.Api.Response do
   defp put_sse_headers(conn, %__MODULE__{params: %{live: true, live_sse: true}}) do
     conn
     |> Plug.Conn.put_resp_header("content-type", "text/event-stream")
-    |> Plug.Conn.put_resp_header("connection", "keep-alive")
+    |> put_keep_alive_header()
   end
 
   defp put_sse_headers(conn, _response) do
     conn
+  end
+
+  @doc """
+  Adds `connection: keep-alive` on HTTP/1.x connections only.
+
+  `connection` is a connection-specific header, which HTTP/2 forbids
+  (RFC 9113 section 8.2.2): a conforming HTTP/2 client treats a response that
+  carries it as malformed and resets the stream, so SSE through an h2c proxy
+  never reaches its first event. HTTP/2 (and HTTP/3) connections stay open
+  without it.
+  """
+  @spec put_keep_alive_header(Plug.Conn.t()) :: Plug.Conn.t()
+  def put_keep_alive_header(conn) do
+    if Plug.Conn.get_http_protocol(conn) in [:"HTTP/1", :"HTTP/1.0", :"HTTP/1.1"] do
+      Plug.Conn.put_resp_header(conn, "connection", "keep-alive")
+    else
+      conn
+    end
   end
 
   defp send_stream(%Plug.Conn{} = conn, %__MODULE__{status: status} = response) do
