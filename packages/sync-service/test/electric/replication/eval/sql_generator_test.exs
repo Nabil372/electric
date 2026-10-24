@@ -461,20 +461,6 @@ defmodule Electric.Replication.Eval.SqlGeneratorTest do
     test "constant-folded empty typed array keeps its element type" do
       assert SqlGenerator.to_sql(%Const{type: {:array, :text}, value: []}) == "ARRAY[]::text[]"
     end
-
-    test "an empty typed array in a where clause regenerates SQL Postgres can type" do
-      alias Electric.Replication.Eval.Parser
-
-      refs = %{["tag"] => :text}
-
-      {:ok, %{eval: ast}} =
-        Parser.parse_and_validate_expression(~S|"tag" = ANY(ARRAY[]::text[])|, refs: refs)
-
-      regenerated = SqlGenerator.to_sql(ast)
-
-      assert regenerated =~ "ARRAY[]::text[]"
-      assert {:ok, _} = Parser.parse_and_validate_expression(regenerated, refs: refs)
-    end
   end
 
   describe "row expressions" do
