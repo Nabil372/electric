@@ -97,6 +97,7 @@ export interface MessageBatchTransition {
 export interface SseCloseInput {
   connectionDuration: number
   wasAborted: boolean
+  receivedMessages: boolean
   minConnectionDuration: number
   maxShortConnections: number
 }
@@ -570,9 +571,13 @@ export class LiveState extends ActiveState {
     let fellBackToLongPolling = false
     let wasShortConnection = false
 
+    // A body that delivered messages was streamed through, even if it ended
+    // quickly: the server closes a live SSE request that is behind the log
+    // end as soon as it has sent the catch-up.
     if (
       input.connectionDuration < input.minConnectionDuration &&
-      !input.wasAborted
+      !input.wasAborted &&
+      !input.receivedMessages
     ) {
       wasShortConnection = true
       nextConsecutiveShort = nextConsecutiveShort + 1
