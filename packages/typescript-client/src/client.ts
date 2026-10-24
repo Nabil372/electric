@@ -1800,7 +1800,12 @@ export class ShapeStream<T extends Row<unknown> = Row>
       const sse = fetchEventSource(fetchUrl.toString(), {
         headers: sseHeaders,
         fetch,
+        // A fetch that ignored the watchdog's abort can still resolve after
+        // the request restarted; its response must not reach the stream.
         onopen: async (response: Response) => {
+          if (requestAbortController.signal.aborted) {
+            throw new FetchBackoffAbortError()
+          }
           watchdog.rearm()
           this.#connected = true
           const shouldProcessBody = await this.#onInitialResponse(response)
@@ -1810,6 +1815,7 @@ export class ShapeStream<T extends Row<unknown> = Row>
           }
         },
         onmessage: (event: EventSourceMessage) => {
+          if (requestAbortController.signal.aborted) return
           if (event.data) {
             // event.data is a single JSON object
             const schema = this.#syncState.schema! // we know that it is not undefined because it is set in onopen when we call this.#onInitialResponse
@@ -1828,7 +1834,9 @@ export class ShapeStream<T extends Row<unknown> = Row>
           }
         },
         // Keep-alive comments never reach `onmessage`
-        onbytes: watchdog.rearm,
+        onbytes: () => {
+          if (!requestAbortController.signal.aborted) watchdog.rearm()
+        },
         onerror: (error: Error) => {
           // rethrow to close the SSE connection
           throw error

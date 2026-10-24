@@ -345,6 +345,86 @@ describe(`Wake detection`, () => {
       unsub()
     })
 
+    it(`should drop a late SSE response after the watchdog restarted the request`, async () => {
+      vi.useFakeTimers()
+
+      const encode = (message: object) =>
+        new TextEncoder().encode(`data: ${JSON.stringify(message)}\n\n`)
+      let resolveLateFetch!: (response: Response) => void
+      let sseFetchCount = 0
+      const fetchWrapper = (
+        input: RequestInfo | URL,
+        _init?: RequestInit
+      ): Promise<Response> => {
+        if (!input.toString().includes(`live_sse=true`)) {
+          return Promise.resolve(upToDateResponse())
+        }
+        sseFetchCount++
+        // The first SSE fetch ignores abort and resolves late; later ones hang.
+        if (sseFetchCount === 1) {
+          return new Promise<Response>((resolve) => {
+            resolveLateFetch = resolve
+          })
+        }
+        return new Promise<Response>(() => {})
+      }
+
+      const stream = new ShapeStream({
+        url: shapeUrl,
+        params: { table: `foo` },
+        signal: aborter.signal,
+        fetchClient: fetchWrapper,
+        liveSse: true,
+        liveRequestTimeoutMs: 100,
+      })
+      const received: unknown[] = []
+      const unsub = stream.subscribe((messages) => {
+        received.push(...messages)
+      })
+
+      await vi.advanceTimersByTimeAsync(101)
+      expect(sseFetchCount).toBe(2)
+      const messagesBeforeLateResponse = received.length
+
+      resolveLateFetch(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(
+                encode({
+                  headers: { operation: `insert` },
+                  key: `stale`,
+                  value: { id: `stale` },
+                  offset: `1_0`,
+                })
+              )
+              controller.enqueue(
+                encode({ headers: { control: `up-to-date` }, offset: `1_0` })
+              )
+              controller.close()
+            },
+          }),
+          {
+            status: 200,
+            headers: new Headers({
+              'content-type': `text/event-stream`,
+              'electric-handle': `h2`,
+              'electric-offset': `1_0`,
+              'electric-schema': `{}`,
+              'electric-cursor': `c2`,
+            }),
+          }
+        )
+      )
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(received).toHaveLength(messagesBeforeLateResponse)
+      expect(stream.shapeHandle).toBe(`h1`)
+      expect(stream.lastOffset).toBe(`0_0`)
+
+      unsub()
+    })
+
     it(`should keep an SSE request open while keep-alive comments arrive`, async () => {
       vi.useFakeTimers()
 
