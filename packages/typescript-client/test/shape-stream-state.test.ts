@@ -1097,6 +1097,42 @@ describe(`scenario builder`, () => {
     expect(flushed.state.offset).toBe(`9_0`)
   })
 
+  it(`SSE up-to-date without an offset takes the response's header`, () => {
+    const opened = new LiveState(
+      makeShared({ offset: `2_0` })
+    ).handleResponseMetadata(
+      makeResponseInput({ isSse: true, responseOffset: `9_0` })
+    )
+
+    const flushed = opened.state.handleMessageBatch(
+      makeMessageBatchInput({ isSse: true, upToDateOffset: undefined })
+    )
+    expect(flushed.state.offset).toBe(`9_0`)
+
+    // The header belongs to that response only.
+    const next = flushed.state.handleMessageBatch(
+      makeMessageBatchInput({ isSse: true, upToDateOffset: undefined })
+    )
+    expect(next.state.offset).toBe(`9_0`)
+  })
+
+  // Pins the current composition with the up-to-date offset: after a
+  // multi-operation transaction at LSN 7 the header is `7_2` but the
+  // up-to-date gives `7_0`, and the up-to-date wins as before. Keeping the
+  // offset from moving back is a separate rule (see #4806).
+  it(`SSE up-to-date offset still overrides the response's header`, () => {
+    const opened = new LiveState(
+      makeShared({ offset: `5_0` })
+    ).handleResponseMetadata(
+      makeResponseInput({ isSse: true, responseOffset: `7_2` })
+    )
+
+    const flushed = opened.state.handleMessageBatch(
+      makeMessageBatchInput({ isSse: true, upToDateOffset: `7_0` })
+    )
+    expect(flushed.state.offset).toBe(`7_0`)
+  })
+
   it(`long polls after an SSE body ends with unflushed messages, until an up-to-date`, () => {
     const sseOpts = {
       liveSseEnabled: true,
