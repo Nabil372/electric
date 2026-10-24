@@ -459,15 +459,9 @@ defmodule Electric.Shapes.Api.Response do
     conn
   end
 
-  @doc """
-  Adds `connection: keep-alive` on HTTP/1.x connections only.
-
-  `connection` is a connection-specific header, which HTTP/2 forbids
-  (RFC 9113 section 8.2.2): a conforming HTTP/2 client treats a response that
-  carries it as malformed and resets the stream, so SSE through an h2c proxy
-  never reaches its first event. HTTP/2 (and HTTP/3) connections stay open
-  without it.
-  """
+  # `connection` is a connection-specific header, which HTTP/2 forbids
+  # (RFC 9113 section 8.2.2): a conforming client treats a response that
+  # carries it as malformed and resets the stream.
   @spec put_keep_alive_header(Plug.Conn.t()) :: Plug.Conn.t()
   def put_keep_alive_header(conn) do
     if Plug.Conn.get_http_protocol(conn) in [:"HTTP/1", :"HTTP/1.0", :"HTTP/1.1"] do

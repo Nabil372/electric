@@ -86,10 +86,6 @@ defmodule Electric.Plug.ServeShapePlugTest do
     Plug.Test.conn(method, "/" <> query_string, params)
   end
 
-  defp with_http_protocol(%Plug.Conn{adapter: {adapter, payload}} = conn, protocol) do
-    %{conn | adapter: {adapter, %{payload | http_protocol: protocol}}}
-  end
-
   defp build_plug_opts(ctx) do
     Api.plug_opts(
       stack_id: ctx.stack_id,
@@ -1331,7 +1327,7 @@ defmodule Electric.Plug.ServeShapePlugTest do
           %{"table" => "public.users"},
           "?offset=#{@test_offset}&handle=#{@test_shape_handle}&live=true&live_sse=true"
         )
-        |> with_http_protocol(:"HTTP/2")
+        |> Plug.Test.put_http_protocol(:"HTTP/2")
         |> call_serve_shape_plug(ctx)
 
       assert conn.status == 200
