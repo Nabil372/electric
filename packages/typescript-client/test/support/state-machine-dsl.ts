@@ -372,7 +372,7 @@ export function pickRandomEvent(rng: () => number, now: number): EventSpec {
         input: {
           connectionDuration: randInt(10000),
           wasAborted: rng() > 0.7,
-          receivedMessages: rng() > 0.5,
+          advancedOffset: rng() > 0.5,
           minConnectionDuration: 1000,
           maxShortConnections: 3,
         },

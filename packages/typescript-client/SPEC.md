@@ -312,19 +312,22 @@ fetching state — so against a conforming server the first up-to-date a replayi
 stream sees never carries a cursor and suppression does not fire. The dedicated
 test drives the branch with a synthetic cursor header on a non-live response.
 
-### C10: An SSE response that delivered messages is not a short connection
+### C10: An SSE response that moved the offset is not a short connection
 
 `LiveState.handleSseConnectionClosed` counts a non-aborted SSE response that ended
-within `minConnectionDuration` as a short connection only when its body delivered
-no messages. Three short connections in a row fall back to long polling. The server
-answers a live SSE request that is behind the log end with the catch-up and then
-closes it, so a burst of writes ends several SSE responses in a row within
-milliseconds; each one carried events, so no proxy buffered it. Such a response
-neither increments nor resets the counter, and it is not followed by the
-short-connection backoff.
+within `minConnectionDuration` as a short connection only when the stream's offset
+after the response is the offset the request was made at. Three short connections
+in a row fall back to long polling. The server answers a live SSE request that is
+behind the log end with the catch-up and then closes it, so a burst of writes ends
+several SSE responses in a row within milliseconds; each one moved the offset, so
+no proxy buffered it. Such a response neither increments nor resets the counter,
+and it is not followed by the short-connection backoff. A response that carried
+messages but left the offset where it was (a replay of the same operations) still
+counts, so a loop at one offset still backs off and falls back.
 
-**Enforcement**: Dedicated tests (`short connection that received messages leaves the counter unchanged`,
+**Enforcement**: Dedicated tests (`short connection that advanced the offset leaves the counter unchanged`,
 `keeps using SSE when the server closes catch-up responses that carried messages`,
+`falls back to long polling when short SSE responses carry messages but leave the offset where it was`,
 `falls back to long polling after three short SSE responses without messages`).
 
 ## Shape notification semantics

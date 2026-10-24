@@ -97,7 +97,7 @@ export interface MessageBatchTransition {
 export interface SseCloseInput {
   connectionDuration: number
   wasAborted: boolean
-  receivedMessages: boolean
+  advancedOffset: boolean
   minConnectionDuration: number
   maxShortConnections: number
 }
@@ -571,13 +571,15 @@ export class LiveState extends ActiveState {
     let fellBackToLongPolling = false
     let wasShortConnection = false
 
-    // A body that delivered messages was streamed through, even if it ended
-    // quickly: the server closes a live SSE request that is behind the log
-    // end as soon as it has sent the catch-up.
+    // A response that moved the offset was streamed through, even if it
+    // ended quickly: the server closes a live SSE request that is behind the
+    // log end as soon as it has sent the catch-up. One that left the offset
+    // where the request started still counts, or a replay at one offset
+    // would loop without backoff.
     if (
       input.connectionDuration < input.minConnectionDuration &&
       !input.wasAborted &&
-      !input.receivedMessages
+      !input.advancedOffset
     ) {
       wasShortConnection = true
       nextConsecutiveShort = nextConsecutiveShort + 1

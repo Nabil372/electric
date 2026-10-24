@@ -446,7 +446,12 @@ describe(`ShapeStream`, () => {
               })
             )
             controller.enqueue(
-              encode({ headers: { control: `up-to-date` }, offset: `${n}_0` })
+              encode({
+                headers: {
+                  control: `up-to-date`,
+                  global_last_seen_lsn: `${n}`,
+                },
+              })
             )
             controller.close()
           },
@@ -470,6 +475,80 @@ describe(`ShapeStream`, () => {
 
         expect(sseRequests).toBe(catchUps + 1)
         expect(warnSpy).not.toHaveBeenCalledWith(
+          expect.stringContaining(`SSE connections are closing immediately`),
+          expect.any(Error)
+        )
+      } finally {
+        warnSpy.mockRestore()
+      }
+    })
+
+    it(`falls back to long polling when short SSE responses carry messages but leave the offset where it was`, async () => {
+      const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const liveRequests: Array<string> = []
+
+      const fetchMock = vi.fn((input: string | URL | Request) => {
+        const url = new URL(input.toString())
+        if (url.searchParams.get(`live`) !== `true`) {
+          return Promise.resolve(initialResponse())
+        }
+
+        liveRequests.push(url.toString())
+        if (url.searchParams.get(`live_sse`) !== `true`) {
+          return new Promise<Response>(() => {})
+        }
+
+        // Every response replays one transaction at LSN 0 and ends with an
+        // up-to-date naming that LSN, which puts the offset back at `0_0`.
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            for (const op of [1, 2]) {
+              controller.enqueue(
+                encode({
+                  key: `row-${op}`,
+                  value: { id: `${op}` },
+                  headers: {
+                    operation: `insert`,
+                    relation: [`public`, `test`],
+                  },
+                  offset: `0_${op}`,
+                })
+              )
+            }
+            controller.enqueue(
+              encode({
+                headers: { control: `up-to-date`, global_last_seen_lsn: `0` },
+              })
+            )
+            controller.close()
+          },
+        })
+        return Promise.resolve(sseResponse(body, `0_2`))
+      })
+
+      const stream = new ShapeStream({
+        url: shapeUrl,
+        params: { table: `test` },
+        signal: aborter.signal,
+        fetchClient: fetchMock,
+        liveSse: true,
+      })
+      stream.subscribe(() => {})
+
+      try {
+        await vi.waitFor(() => {
+          expect(liveRequests).toHaveLength(4)
+        })
+
+        const sentOffsets = liveRequests.map((url) =>
+          new URL(url).searchParams.get(`offset`)
+        )
+        const usedSse = liveRequests.map(
+          (url) => new URL(url).searchParams.get(`live_sse`) === `true`
+        )
+        expect(sentOffsets).toEqual([`0_0`, `0_0`, `0_0`, `0_0`])
+        expect(usedSse).toEqual([true, true, true, false])
+        expect(warnSpy).toHaveBeenCalledWith(
           expect.stringContaining(`SSE connections are closing immediately`),
           expect.any(Error)
         )

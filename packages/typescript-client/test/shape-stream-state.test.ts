@@ -184,7 +184,7 @@ describe(`shape stream state machine`, () => {
     const transition = live.handleSseConnectionClosed({
       connectionDuration: 5000,
       wasAborted: false,
-      receivedMessages: false,
+      advancedOffset: false,
       minConnectionDuration: 1000,
       maxShortConnections: 3,
     })
@@ -204,7 +204,7 @@ describe(`shape stream state machine`, () => {
     const transition = live.handleSseConnectionClosed({
       connectionDuration: 100,
       wasAborted: false,
-      receivedMessages: false,
+      advancedOffset: false,
       minConnectionDuration: 1000,
       maxShortConnections: 3,
     })
@@ -224,7 +224,7 @@ describe(`shape stream state machine`, () => {
     const transition = live.handleSseConnectionClosed({
       connectionDuration: 100,
       wasAborted: false,
-      receivedMessages: false,
+      advancedOffset: false,
       minConnectionDuration: 1000,
       maxShortConnections: 3,
     })
@@ -245,7 +245,7 @@ describe(`shape stream state machine`, () => {
     const transition = live.handleSseConnectionClosed({
       connectionDuration: 100, // short duration, but aborted intentionally
       wasAborted: true,
-      receivedMessages: false,
+      advancedOffset: false,
       minConnectionDuration: 1000,
       maxShortConnections: 3,
     })
@@ -256,9 +256,9 @@ describe(`shape stream state machine`, () => {
     expect(transition.fellBackToLongPolling).toBe(false)
   })
 
-  // A short connection that delivered messages is a catch-up the server
+  // A short connection that moved the offset is a catch-up the server
   // closed after sending it, not a sign that a proxy is buffering.
-  it(`short connection that received messages leaves the counter unchanged`, () => {
+  it(`short connection that advanced the offset leaves the counter unchanged`, () => {
     const live = new LiveState(makeShared(), {
       consecutiveShortSseConnections: 2,
     })
@@ -266,7 +266,7 @@ describe(`shape stream state machine`, () => {
     const transition = live.handleSseConnectionClosed({
       connectionDuration: 10,
       wasAborted: false,
-      receivedMessages: true,
+      advancedOffset: true,
       minConnectionDuration: 1000,
       maxShortConnections: 3,
     })
@@ -564,7 +564,7 @@ describe(`shape stream state machine`, () => {
     const transition = syncing.handleSseConnectionClosed({
       connectionDuration: 100,
       wasAborted: false,
-      receivedMessages: false,
+      advancedOffset: false,
       minConnectionDuration: 1000,
       maxShortConnections: 3,
     })
@@ -1155,7 +1155,7 @@ describe(`tier-2: transition truth table`, () => {
       input: {
         connectionDuration: 5000,
         wasAborted: false,
-        receivedMessages: false,
+        advancedOffset: false,
         minConnectionDuration: 1000,
         maxShortConnections: 3,
       },
