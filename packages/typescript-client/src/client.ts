@@ -382,9 +382,16 @@ export interface ShapeStreamOptions<T = never> {
    * in-flight fetch can hang indefinitely across app lifecycle or network
    * transitions.
    *
+   * Live SSE requests are watched too, but the timer re-arms whenever the
+   * response's headers or any body bytes arrive, so it only fires on an SSE
+   * connection that has gone silent (for example, half-open after a network
+   * change).
+   *
    * The default (45s) is intentionally longer than Electric's server-side
-   * long-poll timeout (20s), so firing the watchdog indicates a request that
-   * failed to settle rather than a normal long-poll waiting for data.
+   * long-poll timeout (20s) and SSE keep-alive interval (21s), so firing the
+   * watchdog indicates a request that failed to settle rather than a normal
+   * long-poll waiting for data or an idle SSE stream. Keep any custom value
+   * above both.
    *
    * Must be a positive finite number. Set to `false` to disable the watchdog.
    */
