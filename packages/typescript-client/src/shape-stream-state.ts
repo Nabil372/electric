@@ -97,6 +97,7 @@ export interface MessageBatchTransition {
 export interface SseCloseInput {
   connectionDuration: number
   wasAborted: boolean
+  // Offset differs from the request's; a move back (`X_k` to `X_0`) counts too.
   advancedOffset: boolean
   minConnectionDuration: number
   maxShortConnections: number
