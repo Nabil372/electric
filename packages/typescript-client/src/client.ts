@@ -1684,6 +1684,45 @@ export class ShapeStream<T extends Row<unknown> = Row>
     }
   }
 
+  /**
+   * Restarts an SSE request that receives nothing for `liveRequestTimeoutMs`,
+   * like the live long-poll watchdog. Call `rearm` when the headers arrive and
+   * on every body chunk, which includes the server's keep-alive comments.
+   */
+  #watchSseRequest(requestAbortController: AbortController): {
+    rearm: () => void
+    timedOut: Promise<never>
+    stop: () => void
+  } {
+    const timeoutMs = this.#liveRequestTimeoutMs
+    if (timeoutMs === false) {
+      return {
+        rearm: () => {},
+        timedOut: new Promise<never>(() => {}),
+        stop: () => {},
+      }
+    }
+
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    let rejectTimedOut!: (error: Error) => void
+    const timedOut = new Promise<never>((_, reject) => {
+      rejectTimedOut = reject
+    })
+    const rearm = () => {
+      clearTimeout(timeout)
+      timeout = setTimeout(() => {
+        if (!requestAbortController.signal.aborted) {
+          this.#restartAbortControllers.add(requestAbortController)
+          requestAbortController.abort(LIVE_REQUEST_TIMEOUT)
+        }
+        rejectTimedOut(new FetchBackoffAbortError())
+      }, timeoutMs)
+    }
+
+    rearm()
+    return { rearm, timedOut, stop: () => clearTimeout(timeout) }
+  }
+
   async #requestShapeLongPoll(opts: {
     fetchUrl: URL
     requestAbortController: AbortController
@@ -1737,6 +1776,7 @@ export class ShapeStream<T extends Row<unknown> = Row>
   }): Promise<void> {
     const { fetchUrl, requestAbortController, headers } = opts
     const fetch = this.#sseFetchClient
+    const watchdog = this.#watchSseRequest(requestAbortController)
 
     // Track when the SSE connection starts
     this.#lastSseConnectionStartTime = Date.now()
@@ -1750,10 +1790,11 @@ export class ShapeStream<T extends Row<unknown> = Row>
     let ignoredStaleResponse = false
     try {
       let buffer: Array<Message<T>> = []
-      await fetchEventSource(fetchUrl.toString(), {
+      const sse = fetchEventSource(fetchUrl.toString(), {
         headers: sseHeaders,
         fetch,
         onopen: async (response: Response) => {
+          watchdog.rearm()
           this.#connected = true
           const shouldProcessBody = await this.#onInitialResponse(response)
           if (!shouldProcessBody) {
@@ -1779,12 +1820,15 @@ export class ShapeStream<T extends Row<unknown> = Row>
             }
           }
         },
+        // Keep-alive comments never reach `onmessage`
+        onbytes: watchdog.rearm,
         onerror: (error: Error) => {
           // rethrow to close the SSE connection
           throw error
         },
         signal: requestAbortController.signal,
       })
+      await Promise.race([sse, watchdog.timedOut])
     } catch (error) {
       if (ignoredStaleResponse) {
         // Stale response was ignored in onopen — let the fetch loop retry
@@ -1809,6 +1853,8 @@ export class ShapeStream<T extends Row<unknown> = Row>
         throw error
       }
     } finally {
+      watchdog.stop()
+
       // Check if the SSE connection closed too quickly
       // This can happen when responses are cached or when the proxy/server
       // is misconfigured for SSE and closes the connection immediately
