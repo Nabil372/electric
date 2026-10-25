@@ -1065,10 +1065,16 @@ defmodule Electric.Shapes.Api do
       request: %{
         api: %{keepalive_interval: keepalive_interval},
         new_changes_ref: ref
-      }
+      },
+      since_offset: since_offset
     } = state
 
     receive do
+      # An earlier segment already read past this change, up to a chunk end.
+      {^ref, :new_changes, latest_log_offset}
+      when is_log_offset_lt(latest_log_offset, since_offset) ->
+        {[], state}
+
       {^ref, :new_changes, latest_log_offset} ->
         stream_new_changes(state, latest_log_offset)
 

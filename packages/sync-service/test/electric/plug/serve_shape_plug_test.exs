@@ -1416,6 +1416,72 @@ defmodule Electric.Plug.ServeShapePlugTest do
       assert body =~ ~s("control":"up-to-date")
     end
 
+    test "sends each change once when a notification is behind the SSE response", ctx do
+      test_pid = self()
+      chunk_end = LogOffset.new(Lsn.from_integer(300), 0)
+
+      log =
+        for lsn <- [200, 250, 300] do
+          {LogOffset.new(Lsn.from_integer(lsn), 0), Jason.encode!(%{key: "change-#{lsn}"})}
+        end
+
+      patch_shape_cache(
+        resolve_shape_handle: fn @test_shape_handle, @test_shape, _stack_id, _opts ->
+          {@test_shape_handle, @test_offset}
+        end,
+        has_shape?: fn @test_shape_handle, _opts -> true end,
+        await_snapshot_start: fn @test_shape_handle, _ -> :started end
+      )
+
+      # The request opens at the log end. By the time the first notification
+      # is handled, all three changes are written and their chunk has closed.
+      patch_storage(
+        get_chunk_end_log_offset: fn offset, _ ->
+          cond do
+            not Process.get(:sse_opened, false) -> nil
+            LogOffset.compare(offset, chunk_end) == :lt -> chunk_end
+            true -> nil
+          end
+        end,
+        get_log_stream: fn since, up_to, @test_opts ->
+          if since == @test_offset and up_to == @test_offset do
+            Process.put(:sse_opened, true)
+            send(test_pid, :sse_open)
+          end
+
+          for {offset, entry} <- log,
+              LogOffset.compare(offset, since) == :gt,
+              LogOffset.compare(offset, up_to) != :gt,
+              do: entry
+        end
+      )
+
+      ctx = Map.put(ctx, :sse_timeout, 500)
+
+      task =
+        Task.async(fn ->
+          ctx
+          |> conn(
+            :get,
+            %{"table" => "public.users"},
+            "?offset=#{@test_offset}&handle=#{@test_shape_handle}&live=true&live_sse=true"
+          )
+          |> call_serve_shape_plug(ctx)
+        end)
+
+      assert_receive :sse_open, @receive_timeout
+
+      # The first segment reads to the chunk end, past the second notification.
+      Registry.dispatch(ctx.registry, @test_shape_handle, fn [{pid, ref}] ->
+        for {offset, _entry} <- log, do: send(pid, {ref, :new_changes, offset})
+      end)
+
+      %{resp_body: body} = Task.await(task)
+
+      assert Regex.scan(~r/"key":"([^"]+)"/, body, capture: :all_but_first) ==
+               [["change-200"], ["change-250"], ["change-300"]]
+    end
+
     test "works with deprecated experimental_live_sse=true", ctx do
       patch_shape_cache(
         resolve_shape_handle: fn @test_shape_handle, @test_shape, _stack_id, _opts ->
