@@ -11,7 +11,7 @@ defmodule Electric.Shapes.Api do
   alias __MODULE__.Response
   alias __MODULE__.SseState
 
-  import Electric.Replication.LogOffset, only: [is_log_offset_lt: 2]
+  import Electric.Replication.LogOffset, only: [is_log_offset_lt: 2, is_log_offset_lte: 2]
 
   require Logger
 
@@ -1070,9 +1070,9 @@ defmodule Electric.Shapes.Api do
     } = state
 
     receive do
-      # An earlier segment already read past this change, up to a chunk end.
+      # An earlier segment already read up to or past this change.
       {^ref, :new_changes, latest_log_offset}
-      when is_log_offset_lt(latest_log_offset, since_offset) ->
+      when is_log_offset_lte(latest_log_offset, since_offset) ->
         {[], state}
 
       {^ref, :new_changes, latest_log_offset} ->

@@ -1480,6 +1480,8 @@ defmodule Electric.Plug.ServeShapePlugTest do
 
       assert Regex.scan(~r/"key":"([^"]+)"/, body, capture: :all_but_first) ==
                [["change-200"], ["change-250"], ["change-300"]]
+
+      assert length(Regex.scan(~r/"control":"up-to-date"/, body)) == 1
     end
 
     test "works with deprecated experimental_live_sse=true", ctx do
