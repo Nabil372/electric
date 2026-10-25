@@ -572,14 +572,15 @@ describe(`ShapeStream`, () => {
           return new Promise<Response>(() => {})
         }
 
-        // A buffering proxy: the body ends before any event reaches the client.
+        // A buffering proxy: the body ends before any event reaches the
+        // client, though the header already names the end of a catch-up.
         const body = new ReadableStream<Uint8Array>({
           start(controller) {
             controller.enqueue(new TextEncoder().encode(`: keep-alive\n\n`))
             controller.close()
           },
         })
-        return Promise.resolve(sseResponse(body, `0_0`))
+        return Promise.resolve(sseResponse(body, `1_0`))
       })
 
       const stream = new ShapeStream({

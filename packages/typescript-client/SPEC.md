@@ -315,12 +315,13 @@ test drives the branch with a synthetic cursor header on a non-live response.
 ### C10: An SSE response that moved the offset is not a short connection
 
 `LiveState.handleSseConnectionClosed` counts a non-aborted SSE response that ended
-within `minConnectionDuration` as a short connection only when the stream's offset
-after the response is the offset the request was made at. Three short connections
-in a row fall back to long polling. The server answers a live SSE request that is
-behind the log end with the catch-up and then closes it, so a burst of writes ends
-several SSE responses in a row within milliseconds; each one moved the offset, so
-no proxy buffered it. Such a response neither increments nor resets the counter,
+within `minConnectionDuration` as a short connection unless its body delivered
+messages and the stream's offset after the response differs from the offset the
+request was made at. The offset header alone does not exempt a response. Three
+short connections in a row fall back to long polling. The server answers a live SSE
+request that is behind the log end with the catch-up and then closes it, so a burst
+of writes ends several SSE responses in a row within milliseconds; each one
+delivered messages and moved the offset, so no proxy buffered it. Such a response neither increments nor resets the counter,
 and it is not followed by the short-connection backoff. A response that carried
 messages but left the offset where it was (a replay of the same operations) still
 counts, so a loop at one offset still backs off and falls back.
